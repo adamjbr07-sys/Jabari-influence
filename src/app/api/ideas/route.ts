@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { anthropic, MODEL, IDEAS_SYSTEM_PROMPT } from '@/lib/claude'
+import { generateText, IDEAS_SYSTEM_PROMPT } from '@/lib/claude'
+
+// Subscription auth spawns the `claude` CLI subprocess — requires the Node.js runtime.
+export const runtime = 'nodejs'
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,17 +12,12 @@ export async function POST(req: NextRequest) {
       ? `Category: ${category}. Situation/mood today: ${situation}`
       : `Category: ${category}`
 
-    const message = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 1024,
+    const ideas = await generateText({
       system: IDEAS_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
+      prompt: userMessage,
     })
 
-    const text =
-      message.content[0].type === 'text' ? message.content[0].text : ''
-
-    return NextResponse.json({ ideas: text })
+    return NextResponse.json({ ideas })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 500 })

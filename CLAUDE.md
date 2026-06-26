@@ -22,7 +22,9 @@ The dev server also exposes `http://192.168.2.27:3000` on the local network (for
 
 ## Environment
 
-Requires `ANTHROPIC_API_KEY` in `.env.local`. The app builds and serves without it, but all AI features return a 500 error with a user-facing message pointing to `.env.local`.
+AI features run on the host's **Claude subscription** via the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) — not `ANTHROPIC_API_KEY` per-token billing. Auth resolves from `CLAUDE_CODE_OAUTH_TOKEN` if set, otherwise the logged-in `claude /login` session. To connect on a host: run `claude setup-token` and set `CLAUDE_CODE_OAUTH_TOKEN`, or run `claude /login`.
+
+Because the SDK spawns the `claude` CLI as a subprocess, the AI routes must run on a **Node.js host with the CLI installed** (the route handlers pin `runtime = 'nodejs'`). This does not work on Edge/serverless. If `ANTHROPIC_API_KEY` is set in the environment it takes precedence over the subscription and bills per-token — leave it unset to stay on the subscription. The app builds and serves without any auth, but AI features return a 500 with a user-facing message pointing to the setup steps.
 
 ---
 
@@ -39,7 +41,7 @@ page.tsx (client, owns tab + pendingIdea state)
 
 **Persistence:** `src/lib/storage.ts` wraps `localStorage` under key `cos_ideas`. Only saved ideas persist — generated ideas and captions are ephemeral. Deduplication is by **text content** (not id), so saving the same idea text twice is a no-op.
 
-**Claude layer:** `src/lib/claude.ts` exports the Anthropic client, model constant (`claude-sonnet-4-6`), and both system prompts. All AI calls are server-side only (route handlers). The system prompts are highly specific to @adam.jbrr's content formula — do not generalize them.
+**Claude layer:** `src/lib/claude.ts` exports the model constant (`claude-sonnet-4-6`), both system prompts, and `generateText({system, prompt})` — a single-shot, no-tools wrapper around the Claude Agent SDK's `query()` that returns the final assistant text. It runs on the host's Claude subscription (see Environment), with `allowedTools: []`, `settingSources: []` (no local CLAUDE.md/settings), and `cwd: '/tmp'` (no project file I/O). All AI calls are server-side only (route handlers). The system prompts are highly specific to @adam.jbrr's content formula — do not generalize them.
 
 **Hook parsing:** `/api/hook/route.ts` parses Claude's response by searching for literal strings `HOOK:`, `TIKTOK:`, `INSTAGRAM:` using `indexOf`. The system prompt enforces this exact format. If parsing produces empty strings, check whether Claude deviated from the format.
 
@@ -51,7 +53,7 @@ page.tsx (client, owns tab + pendingIdea state)
 
 ## Testing
 
-Playwright E2E suite at `tests/app.spec.ts`. All Claude API calls are mocked via `page.route()` — tests run without a real API key.
+Playwright E2E suite at `tests/app.spec.ts`. All Claude calls are mocked via `page.route()` on `/api/ideas` and `/api/hook` — tests run without a Claude subscription or any real generation.
 
 ```bash
 # Dev server must be running first

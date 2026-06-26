@@ -1,19 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { anthropic, MODEL, HOOK_SYSTEM_PROMPT } from '@/lib/claude'
+import { generateText, HOOK_SYSTEM_PROMPT } from '@/lib/claude'
+
+// Subscription auth spawns the `claude` CLI subprocess — requires the Node.js runtime.
+export const runtime = 'nodejs'
 
 export async function POST(req: NextRequest) {
   try {
     const { idea } = await req.json()
 
-    const message = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 512,
+    const text = await generateText({
       system: HOOK_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: idea }],
+      prompt: idea,
     })
-
-    const text =
-      message.content[0].type === 'text' ? message.content[0].text : ''
 
     function extractSection(raw: string, start: string, end?: string): string {
       const si = raw.indexOf(start)

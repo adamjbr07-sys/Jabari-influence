@@ -1,8 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk'
-
-export const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-})
+import { query } from '@anthropic-ai/claude-agent-sdk'
 
 export const MODEL = 'claude-sonnet-4-6'
 
@@ -20,3 +16,54 @@ Return in EXACTLY this format with no extra text before or after:
 HOOK: [hook text here]
 TIKTOK: [caption + hashtags here]
 INSTAGRAM: [caption + hashtags here]`
+
+/**
+ * Thrown when the Claude subscription isn't connected on the host. The route
+ * handlers surface its message to the client so the UI can show setup steps.
+ */
+export class ClaudeAuthError extends Error {
+  constructor() {
+    super(
+      'Claude subscription not connected. On the host, run "claude setup-token" and set CLAUDE_CODE_OAUTH_TOKEN, or run "claude /login".',
+    )
+    this.name = 'ClaudeAuthError'
+  }
+}
+
+/**
+ * Run a single-shot, no-tools generation through the Claude Agent SDK. This uses
+ * the host's Claude *subscription* (Claude Code OAuth) rather than ANTHROPIC_API_KEY
+ * per-token billing: auth resolves from CLAUDE_CODE_OAUTH_TOKEN if set, otherwise
+ * the logged-in `claude /login` session. The SDK spawns the `claude` CLI, so this
+ * only runs on a Node host with the CLI installed (not Edge/serverless).
+ */
+export async function generateText({
+  system,
+  prompt,
+}: {
+  system: string
+  prompt: string
+}): Promise<string> {
+  const response = query({
+    prompt,
+    options: {
+      model: MODEL,
+      systemPrompt: system,
+      maxTurns: 1,
+      // Plain text generation only — no tools, no local CLAUDE.md/settings, no file I/O.
+      allowedTools: [],
+      settingSources: [],
+      permissionMode: 'bypassPermissions',
+      cwd: '/tmp',
+    },
+  })
+
+  for await (const message of response) {
+    if (message.type === 'result') {
+      if (message.subtype === 'success') return message.result.trim()
+      throw new Error(`Claude run did not complete (${message.subtype}).`)
+    }
+  }
+
+  throw new Error('Claude returned no result.')
+}

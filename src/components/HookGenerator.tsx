@@ -162,8 +162,8 @@ export default function HookGenerator({ initialIdea = '' }: Props) {
       {/* Error */}
       {error && (
         <div className="rounded-xl bg-red-950 border border-red-800 px-4 py-3 text-sm text-red-400">
-          {error.includes('API_KEY') || error.includes('api_key') || error.includes('authentication')
-            ? 'Add your Anthropic API key to .env.local to use this feature.'
+          {/oauth|login|subscription|credential|not connected|authentication|unauthor/i.test(error)
+            ? 'Connect your Claude subscription on the host -- run "claude setup-token" and set CLAUDE_CODE_OAUTH_TOKEN, or run "claude /login".'
             : error}
         </div>
       )}
