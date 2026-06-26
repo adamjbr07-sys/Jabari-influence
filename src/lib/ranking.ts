@@ -82,7 +82,12 @@ export const rankBriefing = (input: RankBriefingInput): RankBriefingResult => {
   const { ideas, posts, platform, targetPerPlatform } = input
 
   const { winnerPostIds } = winnerThreshold({ posts, platform })
-  const shootable = ideas.filter((i) => i.status === 'shootable')
+
+  // Candidates = shootable ideas NOT already filmed (an idea with a post is
+  // in-flight/done). "Make 3 more like this" surfaces fresh ideas, never the
+  // already-posted winner itself.
+  const postedIdeaIds = new Set(posts.map((p) => p.ideaId))
+  const shootable = ideas.filter((i) => i.status === 'shootable' && !postedIdeaIds.has(i.id))
 
   // Lanes of the winning posts' source ideas — what to clone toward.
   const ideaById = new Map(ideas.map((i) => [i.id, i]))

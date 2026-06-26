@@ -28,22 +28,36 @@ Because the SDK spawns the `claude` CLI as a subprocess, the AI routes must run 
 
 ---
 
-## Architecture
+## Architecture (v2 — content production machine)
 
-Single-page app with two tabs. State lives in `src/app/page.tsx` (a client component), which owns the `activeTab` and `pendingIdea` state. When the user clicks "Use this →" in the Ideas tab, `pendingIdea` is set and the Captions tab is activated — `HookGenerator` receives `initialIdea` as a prop and re-mounts on change via `key={pendingIdea}`.
+See `PLAN.md` (build tasks T0-T12, decisions D1-D9) and `CONTRACT.md` (the schema +
+ranking contract). The v1 two-tab generator (IdeaGenerator/HookGenerator/localStorage)
+was replaced.
 
-**Data flow:**
-```
-page.tsx (client, owns tab + pendingIdea state)
-  ├── IdeaGenerator  → POST /api/ideas  → Claude API → returns numbered list
-  └── HookGenerator  → POST /api/hook   → Claude API → returns HOOK:/TIKTOK:/INSTAGRAM: block
-```
+Three-tab client app in `src/app/page.tsx` (Today / Bank / Results), backed by Supabase.
 
-**Persistence:** `src/lib/storage.ts` wraps `localStorage` under key `cos_ideas`. Only saved ideas persist — generated ideas and captions are ephemeral. Deduplication is by **text content** (not id), so saving the same idea text twice is a no-op.
+**Layers:**
+- `src/lib/types.ts` — the frozen contract: `Idea`/`Post` (1:many)/`FollowerLog`, status
+  enums (idea: idea|shootable, post: queued|posted), ranking/pace function + I/O types, constants.
+- `src/lib/db.ts` — server Supabase client. Reads `NEXT_PUBLIC_SUPABASE_URL` (NOT bare
+  `SUPABASE_URL`, which the shell shadows) + `SUPABASE_SERVICE_ROLE_KEY`; throws a clear error
+  when unconfigured so routes degrade gracefully.
+- `src/lib/repo.ts` — the ONLY place that talks to Supabase. Pure row↔type mappers
+  (snake_case+timestamptz ↔ camelCase+epoch-ms; `followerDeltaCandidate` stays null = D5
+  ambiguity) + async CRUD + `importLegacyIdeas`.
+- `src/lib/ranking.ts` — PURE logic (no DB/network/`Date.now()`): `winnerThreshold`
+  (follower-aware, warm-up + trailing-10), `rankBriefing`, `pace`. Computed client-side in page.tsx.
+- `src/lib/claude.ts` — `generateText({system,prompt})` over the Claude Agent SDK subscription
+  (see Environment). Powers `/api/ideas/generate` + `/api/make-shootable`. Prompts are specific
+  to @adam.jbrr — do not generalize.
 
-**Claude layer:** `src/lib/claude.ts` exports the model constant (`claude-sonnet-4-6`), both system prompts, and `generateText({system, prompt})` — a single-shot, no-tools wrapper around the Claude Agent SDK's `query()` that returns the final assistant text. It runs on the host's Claude subscription (see Environment), with `allowedTools: []`, `settingSources: []` (no local CLAUDE.md/settings), and `cwd: '/tmp'` (no project file I/O). All AI calls are server-side only (route handlers). The system prompts are highly specific to @adam.jbrr's content formula — do not generalize them.
+**Routes** (all `runtime = 'nodejs'`, thin over repo): `ideas` (CRUD) · `ideas/generate` (Claude) ·
+`make-shootable` (Claude → hook/captions, flips idea to shootable) · `posts` + `posts/[id]` ·
+`follower-logs` · `backfill` (T5: paste recent posts → posted posts so ranking is warm day one).
 
-**Hook parsing:** `/api/hook/route.ts` parses Claude's response by searching for literal strings `HOOK:`, `TIKTOK:`, `INSTAGRAM:` using `indexOf`. The system prompt enforces this exact format. If parsing produces empty strings, check whether Claude deviated from the format.
+**DB:** local Supabase via `npm run db:start` (Docker; Studio :54323, API :54321). Apply migrations
+with `npm run db:reset` / `npm run migrate`. Local creds live in `.env.local` (gitignored).
+**Start dev with `env -u SUPABASE_URL npm run dev`** (the shell's stray `SUPABASE_URL`).
 
 **Styling:** Tailwind v4 — uses `@import "tailwindcss"` in `globals.css`, no `tailwind.config.ts`. Dark theme is forced via `color-scheme: dark` in CSS (not system-preference-dependent). Accent color is amber-500 (`#f59e0b`). Max content width is `max-w-2xl`. Mobile layout uses a fixed bottom nav bar; desktop shows the tab switcher in the header. Header tab buttons carry `aria-label={tab.label}` so they're findable on mobile where the text label is `hidden sm:inline`.
 
@@ -53,7 +67,7 @@ page.tsx (client, owns tab + pendingIdea state)
 
 ## Testing
 
-Playwright E2E suite at `tests/app.spec.ts`. All Claude calls are mocked via `page.route()` on `/api/ideas` and `/api/hook` — tests run without a Claude subscription or any real generation.
+Two layers: **Vitest** unit tests for pure logic (`npm run test:unit` — ranking boundaries + repo mappers, no DB) and **Playwright** E2E (`npm run test` — `tests/app.spec.ts` mocks the GET routes via `page.route()`, asserts the three-tab shell + empty/error states; needs the dev server up).
 
 ```bash
 # Dev server must be running first

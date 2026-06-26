@@ -1,25 +1,27 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { generateText, IDEAS_SYSTEM_PROMPT } from '@/lib/claude'
+import { NextRequest } from 'next/server'
+import { ok, fail } from '@/lib/api'
+import { listIdeas, createIdea } from '@/lib/repo'
+import type { IdeaStatus } from '@/lib/types'
 
-// Subscription auth spawns the `claude` CLI subprocess — requires the Node.js runtime.
 export const runtime = 'nodejs'
 
+// GET /api/ideas?status=shootable — list ideas (newest first)
+export async function GET(req: NextRequest) {
+  try {
+    const status = req.nextUrl.searchParams.get('status') as IdeaStatus | null
+    return ok({ ideas: await listIdeas(status ?? undefined) })
+  } catch (err) {
+    return fail(err)
+  }
+}
+
+// POST /api/ideas — create one idea { text, lane?, status? }
 export async function POST(req: NextRequest) {
   try {
-    const { category, situation } = await req.json()
-
-    const userMessage = situation?.trim()
-      ? `Category: ${category}. Situation/mood today: ${situation}`
-      : `Category: ${category}`
-
-    const ideas = await generateText({
-      system: IDEAS_SYSTEM_PROMPT,
-      prompt: userMessage,
-    })
-
-    return NextResponse.json({ ideas })
+    const body = await req.json()
+    if (!body?.text?.trim()) return fail(new Error('text is required'), 400)
+    return ok({ idea: await createIdea({ text: body.text, lane: body.lane, status: body.status }) })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return fail(err)
   }
 }
