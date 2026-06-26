@@ -45,11 +45,7 @@ export default function Page() {
   const load = useCallback(async () => {
     try {
       setError('')
-      const [a, b, c] = await Promise.all([
-        getJSON('/api/ideas'),
-        getJSON('/api/posts'),
-        getJSON('/api/follower-logs'),
-      ])
+      const [a, b, c] = await Promise.all([getJSON('/api/ideas'), getJSON('/api/posts'), getJSON('/api/follower-logs')])
       setIdeas(a.ideas)
       setPosts(b.posts)
       setLogs(c.logs)
@@ -71,45 +67,82 @@ export default function Page() {
   }, [posts])
   const paces = useMemo(() => {
     if (!today) return null
-    return PLATFORMS.map((p) =>
-      pace({ followerLogs: logs, platform: p, goal: FOLLOWER_GOAL, deadline: GOAL_DEADLINE, today }),
-    )
+    return PLATFORMS.map((p) => pace({ followerLogs: logs, platform: p, goal: FOLLOWER_GOAL, deadline: GOAL_DEADLINE, today }))
   }, [logs, today])
 
   const queued = posts.filter((p) => p.status === 'queued')
-  const posted = posts
-    .filter((p) => p.status === 'posted')
-    .sort((a, b) => (b.postedAt ?? 0) - (a.postedAt ?? 0))
-  const bank = ideas
+  const posted = posts.filter((p) => p.status === 'posted').sort((a, b) => (b.postedAt ?? 0) - (a.postedAt ?? 0))
 
-  async function act(key: string, fn: () => Promise<unknown>) {
-    setBusy(key)
-    try {
-      await fn()
-      await load()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong')
-    } finally {
-      setBusy(null)
-    }
-  }
+  const act = useCallback(
+    async (key: string, fn: () => Promise<unknown>) => {
+      setBusy(key)
+      try {
+        await fn()
+        await load()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Something went wrong')
+      } finally {
+        setBusy(null)
+      }
+    },
+    [load],
+  )
+
+  // shared handlers ----------------------------------------------------------
+  const onBatch = () => act('batch', () => send('/api/batch', 'POST', {}))
+  const onPosted = (post: Post) =>
+    act(`post-${post.id}`, () => {
+      const v = prompt('Views so far? (blank to skip)')
+      const e = prompt('Edit time in minutes? (blank to skip)')
+      return send(`/api/posts/${post.id}`, 'PATCH', {
+        status: 'posted',
+        postedAt: Date.now(),
+        views: v && !isNaN(Number(v)) ? Number(v) : undefined,
+        editMinutes: e && !isNaN(Number(e)) ? Number(e) : undefined,
+      })
+    })
+
+  const paceEl = <PaceCards paces={paces} />
+  const batchEl = <BatchButton busy={busy} onBatch={onBatch} />
+  const queueEl = <TodayQueue queued={queued} ideaById={ideaById} busy={busy} onPosted={onPosted} />
+  const bankEl = (
+    <BankTab
+      bank={ideas}
+      busy={busy}
+      onGenerateSave={(text) => act('gen-save', () => send('/api/ideas', 'POST', { text }))}
+      onMakeShootable={(idea) => act(`shoot-${idea.id}`, () => send('/api/make-shootable', 'POST', { ideaId: idea.id, text: idea.text }))}
+      onQueue={(idea, platform) => act(`q-${idea.id}-${platform}`, () => send('/api/posts', 'POST', { ideaId: idea.id, platform }))}
+      onSetDraft={(idea, url) => act(`draft-${idea.id}`, () => send(`/api/ideas/${idea.id}`, 'PATCH', { draftLink: url }))}
+    />
+  )
+  const resultsEl = (
+    <ResultsTab
+      posted={posted}
+      winners={winners}
+      ideaById={ideaById}
+      today={today}
+      busy={busy}
+      onLogFollowers={(platform, count) => act('log', () => send('/api/follower-logs', 'POST', { platform, date: today, count }))}
+      onBackfill={(rows) => act('backfill', () => send('/api/backfill', 'POST', { rows }))}
+      onClone={(idea) => act(`clone-${idea.id}`, () => send('/api/clone', 'POST', { ideaId: idea.id, text: idea.text, lane: idea.lane }))}
+    />
+  )
 
   return (
     <div className="flex flex-col min-h-screen bg-zinc-950 text-zinc-100">
       <header className="sticky top-0 z-20 bg-zinc-950 border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
           <div>
             <h1 className="text-[17px] font-bold tracking-tight text-white">Content OS</h1>
             <p className="text-[11px] text-zinc-500">@adam.jbrr</p>
           </div>
-          <div className="hidden sm:flex items-center gap-1 bg-zinc-900 rounded-full p-1">
+          {/* tablet tab switcher (phone uses bottom nav, desktop uses two-pane) */}
+          <div className="hidden sm:flex lg:hidden items-center gap-1 bg-zinc-900 rounded-full p-1">
             {TABS.map((t) => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                  tab === t.id ? 'bg-amber-500 text-black' : 'text-zinc-400 hover:text-white'
-                }`}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${tab === t.id ? 'bg-amber-500 text-black' : 'text-zinc-400 hover:text-white'}`}
               >
                 {t.label}
               </button>
@@ -118,81 +151,48 @@ export default function Page() {
         </div>
       </header>
 
-      <main className="flex-1 w-full max-w-2xl mx-auto px-4 py-5 pb-24 flex flex-col gap-6">
+      <main className="flex-1 w-full max-w-2xl lg:max-w-5xl mx-auto px-4 py-5 pb-24 lg:pb-8">
         {error && (
-          <div className="rounded-xl border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-300">
+          <div className="rounded-xl border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-300 mb-6">
             {error}{' '}
             <button onClick={load} className="underline ml-1">
               Retry
             </button>
-            <p className="text-xs text-red-400/70 mt-1">
-              Local dev: start the DB (`npm run db:start`) and run with `env -u SUPABASE_URL npm run dev`.
-            </p>
+            <p className="text-xs text-red-400/70 mt-1">Local dev: `npm run db:start`, then `env -u SUPABASE_URL npm run dev`.</p>
           </div>
         )}
 
-        {tab === 'today' && (
-          <TodayTab
-            paces={paces}
-            queued={queued}
-            ideaById={ideaById}
-            busy={busy}
-            onBatch={() => act('batch', () => send('/api/batch', 'POST', {}))}
-            onPosted={(post) =>
-              act(`post-${post.id}`, () => {
-                const v = prompt('Views so far? (leave blank to skip)')
-                return send(`/api/posts/${post.id}`, 'PATCH', {
-                  status: 'posted',
-                  postedAt: Date.now(),
-                  views: v && !isNaN(Number(v)) ? Number(v) : undefined,
-                })
-              })
-            }
-          />
-        )}
+        {/* phone + tablet: tabbed single column */}
+        <div className="lg:hidden flex flex-col gap-6">
+          {tab === 'today' && (
+            <>
+              {paceEl}
+              {batchEl}
+              {queueEl}
+            </>
+          )}
+          {tab === 'bank' && bankEl}
+          {tab === 'results' && resultsEl}
+        </div>
 
-        {tab === 'bank' && (
-          <BankTab
-            bank={bank}
-            busy={busy}
-            onGenerateSave={(text) => act('gen-save', () => send('/api/ideas', 'POST', { text }))}
-            onMakeShootable={(idea) =>
-              act(`shoot-${idea.id}`, () => send('/api/make-shootable', 'POST', { ideaId: idea.id, text: idea.text }))
-            }
-            onQueue={(idea, platform) =>
-              act(`q-${idea.id}-${platform}`, () => send('/api/posts', 'POST', { ideaId: idea.id, platform }))
-            }
-          />
-        )}
-
-        {tab === 'results' && (
-          <ResultsTab
-            posted={posted}
-            winners={winners}
-            ideaById={ideaById}
-            today={today}
-            busy={busy}
-            onLogFollowers={(platform, count) =>
-              act('log', () => send('/api/follower-logs', 'POST', { platform, date: today, count }))
-            }
-            onBackfill={(rows) => act('backfill', () => send('/api/backfill', 'POST', { rows }))}
-            onClone={(idea) =>
-              act(`clone-${idea.id}`, () =>
-                send('/api/clone', 'POST', { ideaId: idea.id, text: idea.text, lane: idea.lane }),
-              )
-            }
-          />
-        )}
+        {/* desktop: two-pane (DR1) — work on the left, scoreboard on the right */}
+        <div className="hidden lg:grid grid-cols-2 gap-8">
+          <div className="flex flex-col gap-6">
+            {batchEl}
+            {queueEl}
+            {bankEl}
+          </div>
+          <div className="flex flex-col gap-6">
+            {paceEl}
+            {resultsEl}
+          </div>
+        </div>
       </main>
 
       <nav className="fixed bottom-0 inset-x-0 z-20 bg-zinc-900 border-t border-zinc-800 sm:hidden">
         <div className="flex max-w-2xl mx-auto">
           {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`flex-1 py-3 text-xs font-semibold ${tab === t.id ? 'text-amber-500' : 'text-zinc-500'}`}
-            >
+            <button key={t.id} onClick={() => setTab(t.id)} className={`flex-1 py-3 text-xs font-semibold ${tab === t.id ? 'text-amber-500' : 'text-zinc-500'}`}>
               {t.label}
             </button>
           ))}
@@ -202,89 +202,89 @@ export default function Page() {
   )
 }
 
-// ---- Today ------------------------------------------------------------------
+// ---- pieces -----------------------------------------------------------------
 
-function TodayTab({
-  paces,
+function PaceCards({ paces }: { paces: ReturnType<typeof pace>[] | null }) {
+  return (
+    <section>
+      <Eyebrow>Pace to {FOLLOWER_GOAL.toLocaleString()} · by {GOAL_DEADLINE}</Eyebrow>
+      <div className="flex gap-2.5">
+        {paces?.map((p) => (
+          <div key={p.platform} className="flex-1 rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
+            <div className="flex justify-between items-center">
+              <span className="text-[11px] font-semibold text-zinc-400">{PLATFORM_LABEL[p.platform]}</span>
+              <span className={`text-[11px] font-bold ${p.aheadBehind >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {p.aheadBehind >= 0 ? `+${p.aheadBehind} ahead` : `${Math.abs(p.aheadBehind)} behind`}
+              </span>
+            </div>
+            <div className="text-xl font-extrabold tracking-tight tabular-nums text-white">{p.current.toLocaleString()}</div>
+            <div className="text-[10px] text-zinc-500 tabular-nums">~{p.perDayRequired}/day to go</div>
+          </div>
+        )) ?? <div className="text-xs text-zinc-500">Loading pace…</div>}
+      </div>
+    </section>
+  )
+}
+
+function BatchButton({ busy, onBatch }: { busy: string | null; onBatch: () => void }) {
+  return (
+    <button
+      onClick={onBatch}
+      disabled={busy === 'batch'}
+      className="w-full rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-extrabold py-3.5 shadow-[0_6px_24px_rgba(245,158,11,0.25)]"
+    >
+      {busy === 'batch' ? 'Building your batch…' : "Generate tomorrow's batch"}
+    </button>
+  )
+}
+
+function TodayQueue({
   queued,
   ideaById,
   busy,
-  onBatch,
   onPosted,
 }: {
-  paces: ReturnType<typeof pace>[] | null
   queued: Post[]
   ideaById: Map<string, Idea>
   busy: string | null
-  onBatch: () => void
   onPosted: (p: Post) => void
 }) {
   return (
-    <>
-      <section>
-        <Eyebrow>Pace to {FOLLOWER_GOAL.toLocaleString()} · by {GOAL_DEADLINE}</Eyebrow>
-        <div className="flex gap-2.5">
-          {paces?.map((p) => (
-            <div key={p.platform} className="flex-1 rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
-              <div className="flex justify-between items-center">
-                <span className="text-[11px] font-semibold text-zinc-400">{PLATFORM_LABEL[p.platform]}</span>
-                <span className={`text-[11px] font-bold ${p.aheadBehind >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {p.aheadBehind >= 0 ? `+${p.aheadBehind} ahead` : `${Math.abs(p.aheadBehind)} behind`}
-                </span>
-              </div>
-              <div className="text-xl font-extrabold tracking-tight tabular-nums text-white">
-                {p.current.toLocaleString()}
-              </div>
-              <div className="text-[10px] text-zinc-500 tabular-nums">~{p.perDayRequired}/day to go</div>
-            </div>
-          )) ?? <div className="text-xs text-zinc-500">Loading pace…</div>}
-        </div>
-      </section>
-
-      <button
-        onClick={onBatch}
-        disabled={busy === 'batch'}
-        className="w-full rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-extrabold py-3.5 shadow-[0_6px_24px_rgba(245,158,11,0.25)]"
-      >
-        {busy === 'batch' ? 'Building your batch…' : "Generate tomorrow's batch"}
-      </button>
-
-      <section>
-        <Eyebrow>Today to film · {queued.length}</Eyebrow>
-        {queued.length === 0 ? (
-          <Empty>Nothing queued. Make ideas shootable in the Bank, then queue them to a platform.</Empty>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {queued.map((p) => {
-              const idea = ideaById.get(p.ideaId)
-              return (
-                <div key={p.id} className="rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Pill kind="platform">{PLATFORM_LABEL[p.platform]}</Pill>
-                    {idea?.lane && <Pill kind="lane">{idea.lane}</Pill>}
-                  </div>
-                  <p className="text-sm font-semibold text-white leading-snug">{idea?.hook || idea?.text || '(idea missing)'}</p>
-                  {idea?.draftLink && (
-                    <a href={idea.draftLink} className="text-[11px] text-amber-500 mt-1 inline-block" target="_blank" rel="noreferrer">
-                      draft link
-                    </a>
-                  )}
-                  <div className="mt-2.5">
-                    <button
-                      onClick={() => onPosted(p)}
-                      disabled={busy === `post-${p.id}`}
-                      className="rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black text-xs font-bold px-3 py-2"
-                    >
-                      {busy === `post-${p.id}` ? 'Saving…' : 'Mark posted + log views'}
-                    </button>
-                  </div>
+    <section>
+      <Eyebrow>Today to film · {queued.length}</Eyebrow>
+      {queued.length === 0 ? (
+        <Empty>Nothing queued. Hit &ldquo;Generate tomorrow&apos;s batch&rdquo;, or queue shootable ideas from the Bank.</Empty>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {queued.map((p) => {
+            const idea = ideaById.get(p.ideaId)
+            return (
+              <div key={p.id} className="rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Pill kind="platform">{PLATFORM_LABEL[p.platform]}</Pill>
+                  {idea?.lane && <Pill kind="lane">{idea.lane}</Pill>}
                 </div>
-              )
-            })}
-          </div>
-        )}
-      </section>
-    </>
+                <p className="text-sm font-semibold text-white leading-snug">{idea?.hook || idea?.text || '(idea missing)'}</p>
+                {idea?.draftLink && (
+                  <a href={idea.draftLink} className="text-[11px] text-amber-500 mt-1 inline-block" target="_blank" rel="noreferrer">
+                    draft link
+                  </a>
+                )}
+                <div className="mt-2.5">
+                  <button
+                    onClick={() => onPosted(p)}
+                    disabled={busy === `post-${p.id}`}
+                    className="rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black text-xs font-bold px-3 py-2"
+                  >
+                    {busy === `post-${p.id}` ? 'Saving…' : 'Mark posted + log views'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -296,12 +296,14 @@ function BankTab({
   onGenerateSave,
   onMakeShootable,
   onQueue,
+  onSetDraft,
 }: {
   bank: Idea[]
   busy: string | null
   onGenerateSave: (text: string) => void
   onMakeShootable: (i: Idea) => void
   onQueue: (i: Idea, p: Platform) => void
+  onSetDraft: (i: Idea, url: string) => void
 }) {
   const [draft, setDraft] = useState('')
   const [genBusy, setGenBusy] = useState(false)
@@ -310,11 +312,7 @@ function BankTab({
   async function generate() {
     setGenBusy(true)
     try {
-      const r = await fetch('/api/ideas/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
+      const r = await fetch('/api/ideas/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
       const d = await r.json()
       if (r.ok) setGenerated(d.ideas as string[])
     } finally {
@@ -400,12 +398,36 @@ function BankTab({
                       </button>
                     ))}
                 </div>
+                {idea.status === 'shootable' && <DraftLink idea={idea} busy={busy} onSetDraft={onSetDraft} />}
               </div>
             ))}
           </div>
         )}
       </section>
     </>
+  )
+}
+
+function DraftLink({ idea, busy, onSetDraft }: { idea: Idea; busy: string | null; onSetDraft: (i: Idea, url: string) => void }) {
+  const [url, setUrl] = useState(idea.draftLink ?? '')
+  return (
+    <div className="flex gap-1.5 mt-2">
+      <input
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        placeholder="draft link (CapCut / Drive / Photos)"
+        className="flex-1 rounded-lg bg-zinc-800 border border-zinc-700 px-2.5 py-1.5 text-[11px] text-amber-300 placeholder-zinc-600 focus:outline-none focus:border-amber-500"
+      />
+      {url !== (idea.draftLink ?? '') && (
+        <button
+          onClick={() => onSetDraft(idea, url)}
+          disabled={busy === `draft-${idea.id}`}
+          className="rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[11px] font-semibold px-2.5 disabled:opacity-50"
+        >
+          Save
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -434,7 +456,6 @@ function ResultsTab({
   const [raw, setRaw] = useState('')
 
   function parseBackfill(): unknown[] {
-    // one row per line: platform | text | date(YYYY-MM-DD) | views | lane | followerDelta
     return raw
       .split('\n')
       .map((l) => l.split('|').map((s) => s.trim()))
@@ -561,9 +582,6 @@ function Pill({ kind, children }: { kind: 'platform' | 'lane'; children: ReactNo
   return <span className={`text-[9px] font-bold rounded-full px-2 py-0.5 ${cls}`}>{children}</span>
 }
 function Status({ status }: { status: Idea['status'] }) {
-  const map = {
-    idea: 'bg-zinc-800 text-zinc-400',
-    shootable: 'bg-sky-950 text-sky-300',
-  } as const
+  const map = { idea: 'bg-zinc-800 text-zinc-400', shootable: 'bg-sky-950 text-sky-300' } as const
   return <span className={`text-[9px] font-bold rounded-full px-2 py-0.5 whitespace-nowrap ${map[status]}`}>{status}</span>
 }

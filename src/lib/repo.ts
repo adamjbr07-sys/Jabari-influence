@@ -138,6 +138,7 @@ export async function updateIdea(id: string, patch: Partial<Idea>): Promise<Idea
     lane: patch.lane,
     draft_link: patch.draftLink,
   })
+  if (patch.draftLink === '') payload.draft_link = null // allow clearing
   const { data, error } = await db().from('ideas').update(payload).eq('id', id).select().single()
   if (error) throw error
   return rowToIdea(data as IdeaRow)
