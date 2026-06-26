@@ -17,6 +17,8 @@ HOOK: [hook text here]
 TIKTOK: [caption + hashtags here]
 INSTAGRAM: [caption + hashtags here]`
 
+export const CLONE_SYSTEM_PROMPT = `You are generating follow-ups to a video that worked for @adam.jbrr, a Muslim Arab mechanical engineering student in Toronto. Given one idea that performed well, produce 3 genuinely DIFFERENT variations that keep what made it land but change at least one of: the angle, the audience, the scenario, the opening line, or the payoff. Do NOT just reword the original or swap a noun — each must feel like a NEW video someone would stop to watch, not a near-duplicate (avoid audience fatigue). Stay in his voice and his POV:/How every [X] be like: formats. Return a numbered list, ideas only, exactly 3 lines, no explanation.`
+
 /**
  * Thrown when the Claude subscription isn't connected on the host. The route
  * handlers surface its message to the client so the UI can show setup steps.

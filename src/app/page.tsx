@@ -137,6 +137,7 @@ export default function Page() {
             queued={queued}
             ideaById={ideaById}
             busy={busy}
+            onBatch={() => act('batch', () => send('/api/batch', 'POST', {}))}
             onPosted={(post) =>
               act(`post-${post.id}`, () => {
                 const v = prompt('Views so far? (leave blank to skip)')
@@ -175,6 +176,11 @@ export default function Page() {
               act('log', () => send('/api/follower-logs', 'POST', { platform, date: today, count }))
             }
             onBackfill={(rows) => act('backfill', () => send('/api/backfill', 'POST', { rows }))}
+            onClone={(idea) =>
+              act(`clone-${idea.id}`, () =>
+                send('/api/clone', 'POST', { ideaId: idea.id, text: idea.text, lane: idea.lane }),
+              )
+            }
           />
         )}
       </main>
@@ -203,12 +209,14 @@ function TodayTab({
   queued,
   ideaById,
   busy,
+  onBatch,
   onPosted,
 }: {
   paces: ReturnType<typeof pace>[] | null
   queued: Post[]
   ideaById: Map<string, Idea>
   busy: string | null
+  onBatch: () => void
   onPosted: (p: Post) => void
 }) {
   return (
@@ -232,6 +240,14 @@ function TodayTab({
           )) ?? <div className="text-xs text-zinc-500">Loading pace…</div>}
         </div>
       </section>
+
+      <button
+        onClick={onBatch}
+        disabled={busy === 'batch'}
+        className="w-full rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-extrabold py-3.5 shadow-[0_6px_24px_rgba(245,158,11,0.25)]"
+      >
+        {busy === 'batch' ? 'Building your batch…' : "Generate tomorrow's batch"}
+      </button>
 
       <section>
         <Eyebrow>Today to film · {queued.length}</Eyebrow>
@@ -403,6 +419,7 @@ function ResultsTab({
   busy,
   onLogFollowers,
   onBackfill,
+  onClone,
 }: {
   posted: Post[]
   winners: Map<Platform, Set<string>>
@@ -411,6 +428,7 @@ function ResultsTab({
   busy: string | null
   onLogFollowers: (p: Platform, count: number) => void
   onBackfill: (rows: unknown[]) => void
+  onClone: (idea: Idea) => void
 }) {
   const [counts, setCounts] = useState<Record<string, string>>({})
   const [raw, setRaw] = useState('')
@@ -475,10 +493,23 @@ function ResultsTab({
                     <p className="flex-1 text-[13px] text-zinc-200 leading-snug">{idea?.hook || idea?.text || '(idea)'} </p>
                     {isWinner && <span className="text-amber-500" title="winner">★</span>}
                   </div>
-                  <div className="flex items-center gap-2 mt-1 text-[11px] text-zinc-500 tabular-nums">
-                    <Pill kind="platform">{PLATFORM_LABEL[p.platform]}</Pill>
-                    <span>{(p.views ?? 0).toLocaleString()} views</span>
-                    {typeof p.followerDeltaCandidate === 'number' && <span>+{p.followerDeltaCandidate} followers</span>}
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <div className="flex items-center gap-2 text-[11px] text-zinc-500 tabular-nums">
+                      <Pill kind="platform">{PLATFORM_LABEL[p.platform]}</Pill>
+                      <span>{(p.views ?? 0).toLocaleString()} views</span>
+                      {typeof p.followerDeltaCandidate === 'number' && <span>+{p.followerDeltaCandidate} followers</span>}
+                    </div>
+                    {idea && (
+                      <button
+                        onClick={() => onClone(idea)}
+                        disabled={busy === `clone-${idea.id}`}
+                        className={`rounded-lg text-[11px] font-bold px-2.5 py-1.5 disabled:opacity-50 ${
+                          isWinner ? 'bg-amber-500 hover:bg-amber-400 text-black' : 'bg-zinc-800 hover:bg-zinc-700 text-amber-400'
+                        }`}
+                      >
+                        {busy === `clone-${idea.id}` ? 'Cloning…' : 'Make 3 more'}
+                      </button>
+                    )}
                   </div>
                 </div>
               )
