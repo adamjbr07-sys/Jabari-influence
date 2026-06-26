@@ -67,3 +67,11 @@ Key test conventions:
 - All element locators use `data-testid` attributes or scoped role queries (e.g. `locator('header').getByRole(...)`) — never bare `getByRole` that could match duplicates
 - The `loc` helper object at the top of the test file centralises all selectors
 - Clipboard tests skip on mobile (`isMobile` fixture) — `clipboard-write` is not available in WebKit device emulation
+
+---
+
+## Design System
+Always read `DESIGN.md` before making any visual or UI decisions. All font choices, colors,
+spacing, layout, and aesthetic direction are defined there (scoreboard direction, zinc-950 /
+amber-500 / Geist, mobile single column + desktop two-pane, a11y rules). Do not deviate without
+explicit user approval. In QA, flag any code that doesn't match DESIGN.md.
